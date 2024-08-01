@@ -3,15 +3,22 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from tqdm import tqdm
 import re
+import time
 
 # Paths for log files
-filtered_log_file_path = "/home/jared/oai-cn5g/flask_server/tmp/filtered_traffic_logs.txt"
-malicious_log_file_path = "/home/jared/oai-cn5g/flask_server/tmp/malicious_traffic_logs.txt"
-anomalies_output_file = "/home/jared/oai-cn5g/flask_server/results/anomalies_detected.txt"
-variables_output_file = "/home/jared/oai-cn5g/flask_server/results/packet_variables.txt"
-malicious_variables_output_file = "/home/jared/oai-cn5g/flask_server/results/malicious_packet_variables.txt"
-matches_output_file = "/home/jared/oai-cn5g/flask_server/results/matches.txt"
+filtered_log_file_path = "/home/jared/Desktop/presentation/tmp/filtered_traffic_logs.txt"
+malicious_log_file_path = "/home/jared/Desktop/presentation/tmp/malicious_traffic_logs.txt"
+anomalies_output_file = "/home/jared/Desktop/presentation/results/anomalies_detected.txt"
+variables_output_file = "/home/jared/Desktop/presentation/results/packet_variables.txt"
+malicious_variables_output_file = "/home/jared/Desktop/presentation/results/malicious_packet_variables.txt"
+matches_output_file = "/home/jared/Desktop/presentation/results/matches.txt"
 
+csv_files = {
+    "randomAMFInsert": "/home/jared/Desktop/presentation/packets/randomAMFInsert_packets.csv",
+    "AMFLookingForUDM": "/home/jared/Desktop/presentation/packets/AMFLookingForUDM_packets.csv",
+    "randomDataDump": "/home/jared/Desktop/presentation/packets/randomDataDump_packets.csv",
+    "GetAllNFs": "/home/jared/Desktop/presentation/packets/GetAllNFs_packets.csv"
+}
 # Function to read packet variables from a text file
 def read_packet_variables(file_path):
     print(f"Reading packet variables from {file_path}...")
@@ -163,11 +170,9 @@ def detect_anomalies(entries):
     anomalies.extend(rule_large_packets(entries))
     anomalies.extend(rule_port_scan(entries))
     anomalies.extend(rule_ip_not_in_subnet(entries))
-    anomalies.extend(rule_fake_amf_insert(entries))
     
     # Remove duplicates
-    anomalies_df = pd.DataFrame(anomalies).drop_duplicates()
-    return anomalies_df
+    return anomalies
     
 # Rule to detect high frequency traffic
 def rule_high_frequency(entries, threshold=10, window=1):
@@ -248,21 +253,62 @@ def rule_ip_not_in_subnet(entries, subnet="192.168.70"):
             anomalies.append(entry)
     return anomalies
 
-def rule_fake_amf_insert(entries):
-    print("Applying Fake AMF Insert detection rule...")
+# Function to parse the CSV file
+def parse_csv_file(file_path):
+    df = pd.read_csv(file_path)
+    # Add missing columns with null values
+    missing_columns = ['tos', 'ttl', 'id', 'offset', 'flags', 'length', 'flags2', 'seq', 'ack', 'win', 'length2']
+    for col in missing_columns:
+        if col not in df.columns:
+            df[col] = pd.NA
+    return df
+
+def detect_amf_looking_for_udm(entries):
+    print("Applying AMF Looking for UDM detection rule...")
     anomalies = []
-    for i, entry in tqdm(entries.iterrows(), total=entries.shape[0], desc="Fake AMF Insert Check"):
+    for _, entry in tqdm(entries.iterrows(), total=entries.shape[0], desc="AMF Looking for UDM Check"):
         details = entry['details']
-        if pd.isna(details):
-            continue
-        if (
-            'PUT' in details and
-            'Content-Type: application/json' in details and
-            '"nfType":"AMF"' in details and
-            '"nfStatus":"REGISTERED"' in details
-        ):
+        if pd.notna(details) and 'nnrf-disc/v1/nf-instances?requester-nf-type=AMF&target-nf-type=UDM' in details:
+            entry = entry.fillna(pd.NA).to_dict()
+            entry['anomaly'] = 'AMF Looking for UDM'
             anomalies.append(entry)
     return anomalies
+
+def detect_get_all_nfs(entries):
+    print("Applying Get All NFs detection rule...")
+    anomalies = []
+    for _, entry in tqdm(entries.iterrows(), total=entries.shape[0], desc="Get All NFs Check"):
+        details = entry['details']
+        if pd.notna(details) and 'nnrf-disc/v1/nf-instances?requester-nf-type=AMF&target-nf-type=' in details:
+            entry = entry.fillna(pd.NA).to_dict()
+            entry['anomaly'] = 'Get All NFs'
+            anomalies.append(entry)
+    return anomalies
+
+def detect_random_data_dump(entries):
+    print("Applying Random Data Dump detection rule...")
+    anomalies = []
+    for _, entry in tqdm(entries.iterrows(), total=entries.shape[0], desc="Random Data Dump Check"):
+        details = entry['details']
+        if pd.notna(details) and 'nnrf-disc/v1/nf-instances?requester-nf-type=' in details and 'target-nf-type=' in details:
+            if not details.split('requester-nf-type=')[1].startswith('AMF'):  # Ensure it's not a Get All NFs attack
+                entry = entry.fillna(pd.NA).to_dict()
+                entry['anomaly'] = 'Random Data Dump'
+                anomalies.append(entry)
+    return anomalies
+
+def detect_fake_amf_insert(entries):
+    print("Applying Fake AMF Insert detection rule...")
+    anomalies = []
+    for _, entry in tqdm(entries.iterrows(), total=entries.shape[0], desc="Fake AMF Insert Check"):
+        details = entry['details']
+        if pd.notna(details) and 'nnrf-nfm/v1/nf-instances/' in details:
+            entry = entry.fillna(pd.NA).to_dict()
+            entry['anomaly'] = 'Fake AMF Insert'
+            anomalies.append(entry)
+    return anomalies
+    
+
 # Function to compare normal and malicious entries
 def compare_entries(normal_entries, malicious_entries):
     print("Comparing normal and malicious entries...")
@@ -276,6 +322,7 @@ def compare_entries(normal_entries, malicious_entries):
     return matches
 
 def main():
+    start_time = time.time()
     log_entries = parse_log_file(filtered_log_file_path)
     write_packet_variables(log_entries.to_dict(orient='records'), variables_output_file)
 
@@ -289,12 +336,39 @@ def main():
     log_entries['timestamp'] = pd.to_datetime(log_entries['timestamp'])
     log_entries = log_entries[(log_entries['dst_ip'] == "192.168.70.130")]
 
-    anomalies = detect_anomalies(log_entries)
+    all_anomalies = []
+    
+    # Detect anomalies from log entries
+    log_anomalies = detect_anomalies(log_entries)
+    all_anomalies.extend([anomaly.to_dict() if isinstance(anomaly, pd.Series) else anomaly for anomaly in log_anomalies])
 
-    print("Anomalies DataFrame sample after detection:", anomalies.head())
+    # Detect anomalies from CSV files
+    for attack_name, csv_path in csv_files.items():
+        attack_entries = parse_csv_file(csv_path)
+        if attack_name == "AMFLookingForUDM":
+            all_anomalies.extend(detect_amf_looking_for_udm(attack_entries))
+        elif attack_name == "GetAllNFs":
+            all_anomalies.extend(detect_get_all_nfs(attack_entries))
+        elif attack_name == "randomDataDump":
+            all_anomalies.extend(detect_random_data_dump(attack_entries))
+        elif attack_name == "randomAMFInsert":
+            all_anomalies.extend(detect_fake_amf_insert(attack_entries))
+
+    # Convert the list of anomalies to a DataFrame
+    anomalies_df = pd.DataFrame(all_anomalies)
+
+    # Ensure all columns are present, filling with null if missing
+    all_columns = ['timestamp', 'src_ip', 'src_port', 'dst_ip', 'dst_port', 'protocol', 'tos', 'ttl', 'id', 'offset', 'flags', 'length', 'flags2', 'seq', 'ack', 'win', 'length2', 'details', 'anomaly']
+    for col in all_columns:
+        if col not in anomalies_df.columns:
+            anomalies_df[col] = pd.NA
+
+    print("Anomalies DataFrame sample after detection:", anomalies_df.head())
 
     # Save anomalies to file
-    anomalies.to_csv(anomalies_output_file, index=False, sep=' ')
+    anomalies_df.to_csv(anomalies_output_file, index=False, sep=' ')
+    end_time = time.time()
+    print(f"Time taken: {end_time - start_time} seconds")
     #print(f"Anomalies saved to {anomalies_output_file}")
 
     #matches = compare_entries(anomalies, malicious_entries)
