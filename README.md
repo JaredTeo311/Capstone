@@ -28,4 +28,15 @@ sudo python3 dashboard.py
 
 Navigate to the dashboard in the browser
 http://0.0.0.0:8050/
+
+# some of the attack traffic was taken from the dataset availble here: https://github.com/IdahoLabResearch/5GAD
+@INPROCEEDINGS{10008647,
+  author={Coldwell, Cooper and Conger, Denver and Goodell, Edward and Jacobson, Brendan and Petersen, Bryton and Spencer, Damon and Anderson, Matthew and Sgambati, Matthew},
+  booktitle={2022 IEEE Globecom Workshops (GC Wkshps)}, 
+  title={Machine Learning 5G Attack Detection in Programmable Logic}, 
+  year={2022},
+  volume={},
+  number={},
+  pages={1365-1370},
+  doi={10.11578/dc.20220811.1}}
 ```
