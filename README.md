@@ -10,7 +10,10 @@ change the filepath to your own directory
 
 Check the files directory and run the code to install python libraries needed
 # command to install python libraries
-pip install pandas dash plotly tqdm scapy
+pip3 install pandas dash plotly tqdm scapy pyshark
+
+# command to install tshark for the parsing of packets from pcap to csv
+sudo apt-get install tshark
 
 CD to your directory containing the files, and run the following commands:
 
