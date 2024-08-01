@@ -20,6 +20,9 @@ CD to your directory containing the files, and run the following commands:
 # generate traffic
 sudo python3 generate_traffic.py
 
+#filter packets from dataset
+sudo python3 format_packets.py
+
 # run rule-based detection code
 sudo python3 rule_based_detection.py
 
